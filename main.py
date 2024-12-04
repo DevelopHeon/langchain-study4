@@ -1,7 +1,9 @@
 from lib2to3.pygram import python_grammar
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain import hub
+from langchain_core.tools import Tool
 from langchain_experimental.agents import create_csv_agent
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_react_agent, AgentExecutor
@@ -25,21 +27,15 @@ def main():
     prompt = base_prompt.partial(instructions=instructions)
 
     tools = [PythonREPLTool()]
-    agent = create_react_agent(
+    python_agent = create_react_agent(
         prompt=prompt,
         llm=ChatOpenAI(temperature=0, model="gpt-4o-mini"),
         tools=tools,
     )
 
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-    # agent_executor.invoke(
-    #     input={
-    #         "input": """generate and save in current working directory 15 QRcodes
-    #                             that point to www.udemy.com/course/langchain, you have qrcode package installed already"""
-    #     }
-    # )
+    python_agent_executor = AgentExecutor(agent=python_agent, tools=tools, verbose=True)
 
-    csv_agent = create_csv_agent(
+    csv_agent_executor = create_csv_agent(
         llm=ChatOpenAI(temperature=0, model="gpt-4"),
         path="episode_info.csv",
         verbose=True,
@@ -47,14 +43,49 @@ def main():
 
     )
 
-    # csv_agent.invoke(
-    #     input={"input": "how many columns are there in file episode_info.csv"}
-    # )
+    ####### Router Grand Agent #########
 
-    csv_agent.invoke(
-        input={
-            "input": "print the seasons by ascending order of the number of episodes they have"
-        }
+    def python_agent_executor_wrapper(original_prompt: str) -> dict[str, Any]:
+        return python_agent_executor.invoke({"input": original_prompt})
+
+    tools = [
+        Tool(
+            name="Python Agent",
+            func=python_agent_executor_wrapper,
+            description="""useful when you need to transform natural language to python and execute the python code,
+                          returning the results of the code execution
+                          DOES NOT ACCEPT CODE AS INPUT""",
+        ),
+        Tool(
+            name="CSV Agent",
+            func=csv_agent_executor.invoke,
+            description="""useful when you need to answer question over episode_info.csv file,
+                         takes an input the entire question and returns the answer after running pandas calculations""",
+        ),
+    ]
+    prompt = base_prompt.partial(instructions="")
+    grand_agent = create_react_agent(
+        prompt=prompt,
+        llm=ChatOpenAI(temperature=0, model="gpt-4-turbo"),
+        tools=tools,
+    )
+
+    grand_agent_executor = AgentExecutor(agent=grand_agent, tools=tools, verbose=True)
+
+    print(
+        grand_agent_executor.invoke(
+            {
+                "input": "which season has the most episodes?",
+            }
+        )
+    )
+
+    print(
+        grand_agent_executor.invoke(
+            {
+                "input": "Generate and save in current working directory 15 qrcodes that point to `www.udemy.com/course/langchain`",
+            }
+        )
     )
 
 
